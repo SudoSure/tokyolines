@@ -1,212 +1,220 @@
 <script>
-    mapboxgl.accessToken = "pk.eyJ1IjoibWFwcGFib3giLCJhIjoiY2xzaWR4ZGQ0MWVuZjJqcHFmMGhmNXRkcyJ9.KgQ-BOet8tZ6Z171em-TVQ";
-	const map = new mapboxgl.Map({
-		container: "map",
-		style: "mapbox://styles/mapbox/navigation-night-v1", 
-		center: [-71.0942, 42.3601], 
-		zoom: 13, // starting zoom level
-		minZoom: 12,
-		maxZoom: 15,
-	});
-
-    map.on("load", () => {
-		map.addSource("boston_route", {
-			type: "geojson",
-			data: "https://bostonopendata-boston.opendata.arcgis.com/datasets/boston::existing-bike-network-2022.geojson?outSR=%7B%22latestWkid%22%3A3857%2C%22wkid%22%3A102100%7D",
+	import { onMount } from 'svelte';
+	import mapboxgl from 'mapbox-gl';
+	import { arcgisToGeoJSON } from 'arcgis-to-geojson-utils';
+  
+	mapboxgl.accessToken = 'pk.eyJ1IjoibmF0ZG9zYW4iLCJhIjoiY2xza3huODg4MDh1ZzJpcDVoOTJ1eWFqayJ9.hvQnPf9rwTCV4aok1j7xJA';
+  
+	let mapTokyo;
+	let isRailwayVisible = false;
+	let areStationsVisible = false; // Initial state
+	let isChoroplethVisible = false; 
+	let stationMarkers = [];
+	let geojson;
+  
+	onMount(() => {
+	  // define Tokyo map
+	  mapTokyo = new mapboxgl.Map({
+		container: 'map-tokyo',
+		style: 'mapbox://styles/mapbox/navigation-night-v1',
+		center: [139.7528, 35.6852], // 35.6852° N, 139.7528° E
+		zoom: 12
+	  });
+  
+	  // Pop up for stations
+	  let popup = new mapboxgl.Popup({
+		closeButton: false,
+		closeOnClick: false
+	  });
+  
+	  // Load railways
+	  mapTokyo.on('load', async() => {
+		mapTokyo.addSource('tokyo-railways', {
+		  type: 'geojson',
+		  data: '/N02-19_RailroadSection.geojson'
 		});
-		map.addLayer({
-			id: "boston_route",
-			type: "line",
-			source: "boston_route",
-			paint: {
-				"line-color": "#BEE5B0",
-				"line-width": 3,
-			},
+  
+		// add the actual layer
+		mapTokyo.addLayer({
+		  id: 'tokyo-railways-layer',
+		  type: 'line',
+		  source: 'tokyo-railways',
+		  layout: {},
+		  paint: {
+			'line-color': '#ADD8E6',
+			'line-width': 2,
+			'line-opacity': isRailwayVisible ? 1 : 0
+		  }
 		});
-
-	});
-
-    map.on("load", () => {
-		map.addSource("cambridge_route", {
-			type: "geojson",
-			data: "https://raw.githubusercontent.com/cambridgegis/cambridgegis_data/main/Recreation/Bike_Facilities/RECREATION_BikeFacilities.geojson",
-		});
-		map.addLayer({
-			id: "cambridge_route",
-			type: "line",
-			source: "cambridge_route",
-			paint: {
-				"line-color": "#BEE5B0",
-				"line-width": 3,
-			},
-		});
-	});
-
-    map.on("viewreset", position_station_markers);
-	map.on("move", position_station_markers);
-	map.on("moveend", position_station_markers);
-
-
-    function create_station_markers(station_data) {
-		station_markers = marker_container
-			.selectAll("circle")
-			.data(station_data)
-			.enter()
-			.append("circle")
-			.attr("r", 5)
-			.style("fill", "#808080")
-			.attr("stroke", "#808080")
-			.attr("stroke-width", 1)
-			.attr("fill-opacity", 0.4)
-			.attr("name", function (d) {
-				return d["name"];
-			});
-        position_station_markers();
-	}
-
-    function position_station_markers() {
-		station_markers
-			.attr("cx", function (d) {
-				return project(d).x;
-			})
-			.attr("cy", function (d) {
-				return project(d).y;
-			});
-	}
-
-	function project(d) {
-		return map.project(new mapboxgl.LngLat(+d.lon, +d.lat));
-	}
-
-    function update_station_markers() {
-        station_markers
-        .transition()
-        .duration(1000)
-        .attr("r", function (d) {
-            let trafficVolume = arrivals[d["station_id"]] + departures[d["station_id"]];
-            return scaleRadiusTrafficVolume(trafficVolume);
-        })
-        .style("fill", function(d) {
-            let totalTraffic = arrivals[d["station_id"]] + departures[d["station_id"]];
-            let arrivalRatio = arrivals[d["station_id"]] / totalTraffic;
-            // Define your color scale using d3.scaleLinear()
-            let colorScale = d3.scaleLinear()
-                .domain([0, 1]) // Ratio varies from 0 to 1
-                .range(["blue", "red"]); // Colors for low and high ratios
-
-            return colorScale(arrivalRatio);
-        });
-	}
-
-	function scaleRadiusTrafficVolume(traffic, maxTraffic = 500) {
-		const scaleRadius = d3.scaleSqrt()
-			.domain([0, 1, maxTraffic])
-			.range([0, 3, 20]);
-		return scaleRadius(traffic);
-	}
-
-
-    function tallyTrips(trips_data) {
-		arrivals.fill(0);
-		departures.fill(0);
-		for (let i = 0; i < trips_data.length; ++i) {
-			arrivals[trips_data[i]["end station id"]]++;
-			departures[trips_data[i]["start station id"]]++;
+  
+	  // Load administrative boundaries
+	  mapTokyo.addSource('tokyo-boundaries', {
+		type: 'geojson',
+		data: '/tokyo23_population.geojson'
+	  });
+  
+	  // add administrative boundary layer
+	  mapTokyo.addLayer({
+		id: 'tokyo-administrative-boundaries',
+		type: 'line',
+		source: 'tokyo-boundaries',
+		layout: {},
+		paint: {
+		  'line-color': '#FFFFFF',
+		  'line-width': 2,
 		}
-	}
-
-    function filterTrips(sliderTime) {
-		let value = sliderTimeScale(sliderTime);
-		let filterWindowHours = 0;
-		let filterWindowMinutes = 120;
-		let filterHours = value.getHours();
-		let filterMinutes = value.getMinutes();
-		return trip_data.filter(function (trip) {
-			let tripStartTime = new Date(trip["starttime"]);
-			let tripEndTime = new Date(trip["stoptime"]);
-			let filterStartTime = new Date(tripStartTime.getTime());
-			let filterEndTime = new Date(tripEndTime.getTime());
-			filterStartTime.setHours(filterHours - filterWindowHours / 2);
-			filterEndTime.setHours(filterHours + filterWindowHours / 2);
-			filterStartTime.setMinutes(filterMinutes - filterWindowMinutes / 2);
-			filterEndTime.setMinutes(filterMinutes + filterWindowMinutes / 2);
-			return (
-				(tripStartTime >= filterStartTime &&
-					tripStartTime <= filterEndTime) ||
-				(tripEndTime >= filterStartTime && tripEndTime <= filterEndTime)
-			);
+	  });
+  
+	  // Load Population Density Choropleth source
+	  mapTokyo.addSource('tokyo-population-density', {
+		  type: 'geojson',
+		  data: '/tokyo23_population.geojson'
+	  });
+		
+	  // add the population density layer
+	  mapTokyo.addLayer({
+		id: 'tokyo-population-density',
+		type: 'fill',
+		source: 'tokyo-population-density',
+		paint: {
+		  'fill-color': [
+			'interpolate',
+			['linear'],
+			['get', 'population'],
+			0, '#ffffff',
+			100000, '#614144',
+			300000, '#802A37',
+			500000, '#A51C2A',
+			700000, '#DE0D0D',
+			1000000, '#FF9641'
+		  ],
+		  'fill-opacity': 0.5
+		}
+	  });
+  
+	  // Hover metric: Line name
+	  mapTokyo.on('mousemove', 'tokyo-railways-layer', (e) => {
+		if (e.features.length > 0) {
+		  const feature = e.features[0];
+		  popup.setLngLat(e.lngLat)
+				.setText(feature.properties.路線名)
+				.addTo(mapTokyo);
+		}
+	  });
+  
+	  // Remove line name when hover off
+	  mapTokyo.on('mouseleave', 'tokyo-railways-layer', () => {
+		popup.remove();
+	  });
+  
+	  // Show/hide population numbers on hover
+	  mapTokyo.on('mousemove', 'tokyo-population-density', (e) => {
+		// console.log(e.features[0].properties) they are populated 
+		if (e.features.length > 0) {
+		  const feature = e.features[0];
+		  const population = feature.properties['population'];
+		  // console.log(population) the population numbers are showing in real time
+		  mapTokyo.getCanvas().style.cursor = 'pointer';
+		  popup.setLngLat(e.lngLat)
+			  .setHTML(`<h3>Population: ${population}</h3>`)
+			  .addTo(mapTokyo);
+		}
+	  });
+  
+	  // Remove popup on mouseleave
+	  mapTokyo.on('mouseleave', 'tokyo-population-density', () => {
+		mapTokyo.getCanvas().style.cursor = '';
+		popup.remove();
+	  });
+  
+	  // Calculate opacity based on ridership to population ratio
+	  function calculateOpacity(ridership, population) {
+		const ratio = ridership / population;
+		const minOpacity = 0.4; // Ensure markers are always somewhat visible
+		const maxOpacity = 1.0;
+		let opacity = ratio * (maxOpacity - minOpacity) + minOpacity;
+		opacity = Math.min(Math.max(opacity, minOpacity), maxOpacity); // Clamp between min and max
+		return opacity;
+	  }
+  
+	  // Load stations data 
+	  const response = await fetch('/stations.json'); 
+	  const stationsData = await response.json(); 
+  
+	  Object.values(stationsData).flat().forEach(station => {
+		const opacity = calculateOpacity(station.ridership, station.population);
+		const el = document.createElement('div');
+		el.className = 'station-marker'; // Add CSS for this class as needed
+		el.style.opacity = opacity;
+		el.style.backgroundColor = `rgba(255, 0, 0, ${opacity})`; // Dynamic red color based on opacity
+		el.style.opacity = opacity.toString(); // Explicitly converting to string
+  
+		const marker = new mapboxgl.Marker(el)
+		  .setLngLat(station.coordinates)
+		  .setPopup(new mapboxgl.Popup().setText(`${station.name}: Daily Ridership - ${station.ridership}`))
+		  .addTo(mapTokyo);
 		});
-	}
-
-    
-	const sliderTimeScale = d3
-		.scaleTime()
-		.domain([0, 1440])
-		.range([new Date("2015-12-01 00:00"), new Date("2015-12-02 00:00")]);
-
-
-    let stationsFile = "https://raw.githubusercontent.com/dsc-courses/dsc106-wi24/gh-pages/resources/data/lab6_station_info.json";
-    let tripFile = "https://raw.githubusercontent.com/dsc-courses/dsc106-wi24/gh-pages/resources/data/lab6_bluebikes_2020.csv";
-	let station_data = [];
-	let station_markers;
-    let trip_data = [];
-    let arrivals = new Array(600).fill(0);
-	let departures = new Array(600).fill(0);
-    let filtered_trip_data = [];
-    let slider_time = 720;
-	let slider_label = "";
-
-
-
-	fetch(stationsFile)
-		.then((response) => response.json())
-		.then((d) => (station_data = d.data.stations))
-        .then((d) => create_station_markers(d));
-    
-
-    d3.csv(tripFile).then(function (d) {
-		trip_data = d;
-		console.log(trip_data);
+	  });
 	});
-
-
-$: {
-	if (trip_data.length !== 0) {
-        filtered_trip_data = filterTrips(slider_time);
-		tallyTrips(filtered_trip_data);
-		update_station_markers();
+  
+	// Reactive Elements
+	function toggleRailwayVisibility() {
+	  isRailwayVisible = !isRailwayVisible;
+	  mapTokyo.setPaintProperty('tokyo-railways-layer', 'line-opacity', isRailwayVisible ? 1 : 0);
 	}
-
-    slider_label = sliderTimeScale(slider_time).toLocaleTimeString([], {
-		hour: "numeric",
-		minute: "2-digit",
+	function toggleStationVisibility() {
+	  areStationsVisible = !areStationsVisible;
+	  stationMarkers.forEach(marker => {
+		areStationsVisible ? marker.addTo(mapTokyo) : marker.remove();
 	});
-
-}
-
-
-    const marker_container = d3
-		.select(map.getCanvasContainer() )
-		.append("svg")
-		.attr("width", "100%")
-		.attr("height", "100%")
-		.style("position", "absolute")
-		.style("z-index", 2);
-
-
-
-</script>
-
-<main>
-    <div class="overlay">
-		<label>{slider_label}</label>
-		<input
-			id="slider"
-			type="range"
-			min="1"
-			max="1440"
-			bind:value={slider_time}
-		/>
-	</div>
-
-</main>
+	}
+	// Toggle choropleth visibility
+	function toggleChoroplethVisibility() {
+	  isChoroplethVisible = !isChoroplethVisible;
+	  mapTokyo.setLayoutProperty('tokyo-population-density', 'visibility', isChoroplethVisible ? 'visible' : 'none');
+	}
+  </script>
+  
+  <style>
+	#map-tokyo {
+	  position: relative; /* Needed for absolute positioning of children */
+	  height: 100vh;
+	}
+	.toggle-button {
+	  position: absolute; /* Position the button over the map */
+	  top: 20px; /* Distance from the top of the map container */
+	  right: 20px; /* Distance from the right side of the map container */
+	  z-index: 10; /* Ensure the button is above map layers and controls */
+	  padding: 0.5rem 1rem;
+	  background-color: white; /* Button background for visibility */
+	  border: none; /* Optional: for style */
+	  cursor: pointer; /* Optional: change cursor on hover */
+	  border-radius: 5px; /* Optional: for rounded corners */
+	  box-shadow: 0 2px 4px rgba(0,0,0,0.2); /* Optional: for a subtle shadow */
+	}
+	h1 {
+	  text-align: center;
+	  position: absolute;
+	  top: 10px;
+	  left: 50%;
+	  transform: translateX(-50%);
+	  z-index: 2; /* Ensure title is above map and button */
+	  background-color: rgba(255, 255, 255, 0.8);
+	  padding: 8px 16px;
+	  border-radius: 4px;
+	}
+  </style>
+  
+  
+  <div id="map-tokyo">
+	<h1>Live Traffic Congestion and the 10 Most Active Metro Lines in Tokyo</h1>
+	<button class="toggle-button" on:click={toggleRailwayVisibility}>
+	  {isRailwayVisible ? 'Hide Railway Lines' : 'Show Railway Lines'}
+	</button>
+	<button class="toggle-button" on:click={toggleStationVisibility} style="top: 80px;">
+	  {areStationsVisible ? 'Hide Stations' : 'Show Stations'}
+	</button>
+	<button class="toggle-button" on:click={toggleChoroplethVisibility} style="top: 140px;">
+	  {isChoroplethVisible ? 'Hide Choropleth' : 'Show Choropleth'}
+	</button>
+  </div>
